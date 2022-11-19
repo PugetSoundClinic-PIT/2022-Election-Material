@@ -40,9 +40,9 @@ for(i in 1:39){
   
   #Reads how many candidates there are for 2022
   rows <- if(is_empty(names)==TRUE){0
-  }else{if(TRUE %in% grepl("Past elections|primary", names))
-  {ifelse(min(grep("Past elections|primary", names))==1, 
-          0, min(grep("Past elections|primary", names))-1)
+  }else{if(TRUE %in% grepl("Past elections|primary|convention", names))
+  {ifelse(min(grep("Past elections|primary|convention", names))==1, 
+          0, min(grep("Past elections|primary|convention", names))-1)
   }else{length(names)}} 
   
   #Extracts names based on rows
@@ -87,11 +87,6 @@ for(i in 1:nrow(namesFin)){
     
     #Identifies Party
     partyLink <- InfoPage %>% html_nodes(".widget-row.value-only") %$% data.frame(hrefs=as(., "character"))
-    #Party <- ifelse(is_empty(grep("black", partyLink$hrefs))==FALSE,
-                    #partyLink[max(grep("black", partyLink$hrefs)),1] %>% str_sub(49,-15),
-                    #ifelse(is_empty(grep("Party|Independent|Unaffiliated", partyLink$hrefs))==FALSE,
-                           #partyLink[max(grep("Party|Independent|Unaffiliated", partyLink$hrefs)),1]%>% str_extract("only.*(\")") %>% str_sub(6,-2),
-                           #partyLink[max(grep("white", partyLink$hrefs)),1] %>% str_sub(95,-19)))
     Party <- ifelse(is_empty(grep("black", partyLink$hrefs))==FALSE,
                     partyLink[max(grep("black", partyLink$hrefs)),1] %>% str_sub(49,-15),
                     partyLink[max(grep("Party|Independent|Unaffiliated|Nonpartisan", partyLink$hrefs)),1]%>% str_extract("only.*(\")") %>% str_sub(6,-2))

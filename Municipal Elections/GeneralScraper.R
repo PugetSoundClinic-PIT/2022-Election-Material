@@ -12,57 +12,63 @@ library(stringi)
 #Functions
 `%notin%` <- Negate(`%in%`)
 
-#Get the link from the table (30 states and 2 territories)
-tablePage <- read_html("https://ballotpedia.org/Attorney_General_elections,_2022")
+# Create the table that contains all the race informations 
+tablePage <- read_html("https://ballotpedia.org/United_States_municipal_elections,_2022#By_state")
 totalRaceLinks <- tablePage %>% html_nodes("a") %>% html_attr("href")
-links <- totalRaceLinks[139:147]
-links <- c(links, totalRaceLinks[149:169])
-links <- c(links, "/Guam_Attorney_General_election,_2022")
-links <- c(links, "/Northern_Mariana_Islands_Attorney_General_election,_2022")
+links <- totalRaceLinks[166:385]
 RaceLinks <- vector()
-StateList <- vector()
-for(i in 1:32){
+RaceNames <- vector()
+LocList <- vector()
+for(i in 1:length(links)){
   link <- paste("https://ballotpedia.org",links[i],sep = "")
-  state <- link %>% str_extract("(?<=(org/)).+?(?=(_Att))")%>% str_replace_all("_", " ")
+  race <- ifelse(is_empty(grep("local", link)) ==FALSE,
+                 "Local",
+                 link %>% str_extract("(?<=(org/)).+?(?=(_ele))")%>% str_replace_all("_", " "))
+  location <- ifelse(is_empty(grep("local", link)) ==FALSE,
+                     link %>% str_extract("(?<=(org/)).+?(?=(_local))")%>% str_replace_all("_", " "),
+                     link %>% str_extract("(?<=(in_)).+?(?=(2022))")%>% str_sub(1,-3) %>% str_replace_all("_", " "))
   RaceLinks <- c(RaceLinks, link)
-  StateList <- c(StateList, state)
+  RaceNames <- c(RaceNames, race)
+  LocList <- c(LocList, location)
 }
-rm(tablePage, totalRaceLinks, links, i, link, state)
+TotalRaces <- data.frame(Links = RaceLinks, Races = RaceNames, Locations = LocList)
+TotalRaces <- TotalRaces %>% distinct() # remove duplicates
+Total <- split(TotalRaces, TotalRaces$Races)
+rm(tablePage, totalRaceLinks, links, i, link, race, location, RaceLinks, RaceNames, LocList, TotalRaces)
+
+#Mayoral Elections
+MRaceLinks <- Total[["Mayoral"]][["Links"]]
+MCityList <- Total[["Mayoral"]][["Locations"]]
 
 #Get the candidate's information from the race website
 namesFin <- data.frame()
-for(i in 1:32){
-  url <- RaceLinks[i] #Gets the Ballotpedia URL for a state or territory
+for(i in 1:length(MRaceLinks)){
+  url <- MRaceLinks[i] #Gets the Ballotpedia URL for a district
   webpage <- read_html(url) #Reads the URL
   
   #Retrieves the election type, year, and candidate names for all elections on the page
-  states <- html_nodes(webpage,  '.votebox-header-election-type, .votebox-results-cell--text , .results_text, #Past_elections') 
+  districts <- html_nodes(webpage,  '.votebox-header-election-type, .votebox-results-cell--text , .results_text') 
   
-  names <- html_text(states) #Changes the list to a vector
+  names <- html_text(districts) #Changes the list to a vector
   
   #Reads how many candidates there are for 2022
   rows <- if(is_empty(names)==TRUE){0
-  }else{if(TRUE %in% grepl("Past elections|primary|convention", names))
-  {ifelse(min(grep("Past elections|primary|convention", names))==1, 
-          0, min(grep("Past elections|primary|convention", names))-1)
+  }else{if((TRUE %in% grepl("General election", names))&(TRUE %in% grepl("primary", names))){ifelse(min(grep("primary", names))==1, 0, min(grep("primary", names))-1)
   }else{length(names)}} 
   
-  #Extracts names based on rows
+  #Extracts names based on rows (Also accounts for new districts in 2022)
   names <- if(rows %in% c(0,1)){0}else{names[1:rows]}
   
   #Creates a data frame with each candidates name, district, and a link for their individual candidate web page
-  names <- data.frame(Names=if(rows %in% c(0,1)){"NA"}else{
-    if(is_empty(grep("\t\t\t", names))){names[1:(rows-2)]}else{
-      names[grep("\t\t\t", names)] %>% str_remove_all("\\\t")}}) %>% 
+  names <- data.frame(Names=if(rows %in% c(0,1)){"NA"}else{if(is_empty(grep("\t\t\t", names))){names[1:(rows-2)]}else{names[grep("\t\t\t", names)] %>% str_remove_all("\\\t")}}) %>% 
     mutate(Names = ifelse(Names=="NA", NA, str_remove_all(Names, "\\(.*") %>% str_trim()),
-           State = StateList[i])
+           City = MCityList[i])
   linkpage <- read_html(url) %>% html_nodes(".votebox-results-cell--text") %$% data.frame(hrefs=as(., "character"))
   names$CandPage <- if(TRUE %in% is.na(names$Names)){NA}else{linkpage[1:nrow(names), 1] %>% str_extract("https.+?(?=(\"))") %>% str_sub( 1, -1)}
-  namesFin <- rbind.fill(namesFin, names) #Adds state to total frame
+  namesFin <- rbind.fill(namesFin, names) #Adds district to total frame
 }
-namesFin["CandPage"][namesFin["CandPage"] == "https://ballotpedia.org/William_Robinson"] <- "https://ballotpedia.org/William_Robinson_(Colorado)"
 namesFin <- namesFin %>% distinct() # remove duplicates
-rm(linkpage, RaceLinks, states, names, webpage, url, rows)
+rm(linkpage, MRaceLinks, MCityList, districts, names, webpage, url, rows)
 
 #Get more information from the candidate's website
 Handles <- data.frame()
@@ -107,6 +113,6 @@ for(i in 1:nrow(namesFin)){
 
 namesFin <- cbind(namesFin, Handles %>% select(-Names))
 
-rm(df, links, CampHand, CampWeb, StateList, i, OffHand, Party, PerHand)
+rm(df, links, CampHand, CampWeb, i, OffHand, Party, PerHand)
 
 namesFin <- namesFin %>% mutate(Party = Party %>% str_remove(" (page does not exist)"))
