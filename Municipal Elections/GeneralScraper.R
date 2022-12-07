@@ -437,3 +437,117 @@ MuNamesFin <- cbind(MuNamesFin, Handles %>% select(-Names))
 rm(df, links, CampHand, CampWeb, i, OffHand, Party, PerHand)
 
 MuNamesFin <- MuNamesFin %>% mutate(Party = Party %>% str_remove(" (page does not exist)"))
+
+# Local Elections 
+LRaceLinks <- Total[["Local"]][["Links"]]
+LStateList <- Total[["Local"]][["Locations"]]
+
+for(i in 1:length(LRaceLinks)){
+  # to each local election pages
+  url <- LRaceLinks[i]
+  webpage <- read_html(url)
+  TCountyLinks <- webpage %>%
+    html_nodes("#mw-content-text>div>p>a")
+  TCountyLinks <- TCountyLinks[2:length(TCountyLinks)]
+  TCountyLinks <- TCountyLinks[!grepl("City", TCountyLinks)]
+  CountyNames <- html_text(TCountyLinks)
+  CountyLinks <- as.character(TCountyLinks) %>% 
+    str_extract("(?<=(href=\")).+?(?=(\" title))")
+  CountyLinks <- paste("https://ballotpedia.org", CountyLinks, sep = "")
+  countyNames <- data.frame()
+  for(j in 1:length(CountyLinks)){
+    # to each county election pages
+    url <- CountyLinks[j] #Gets the Ballotpedia URL for a district
+    webpage <- read_html(url) #Reads the URL
+    tableLinks <- webpage %>%
+      html_nodes("h2>span,
+      h3>span,
+      div>p>b,
+      div>ul>li>a")
+    tableLinks <- tableLinks[!(grepl("data-toggle", tableLinks)|grepl("2C_2022", tableLinks))]
+    startI <- min(grep("#Voting_information", tableLinks))+1
+    endI <- max(grep("#Voting_information", tableLinks))
+    tableLinks <- tableLinks[startI:endI]
+    titleIndex <- grep("mw-headline", tableLinks)
+    primaryI <- grep("General|Primary", tableLinks)
+    subTitleIndex <- grep("<b>", tableLinks)
+    titleIndex <- append(titleIndex,length(tableLinks))
+    primaryI <- append(primaryI,length(tableLinks))
+    subTitleIndex <- append(subTitleIndex,titleIndex[2])
+    if(length(titleIndex)<2){next}
+    tracker <- ifelse((titleIndex[length(titleIndex)]-titleIndex[length(titleIndex)-1])==1,
+                      length(titleIndex)-2, length(titleIndex)-1)
+    pageNames <- data.frame()
+    for(t in 1:tracker){
+      # to each title section 
+      race <- html_text(tableLinks[titleIndex[t]]) %>% str_extract(".*elections")
+      # if(TRUE %notin% (primaryI == (titleIndex[(t)]+1))){next}
+      subTracker1 <- which(primaryI == (titleIndex[(t)]+1)) #2,29
+      subTracker2 <- ifelse(t==tracker, length(primaryI)-1,
+                            which(primaryI == (titleIndex[t+1]+1))-1) #29 63
+      for(z in subTracker1:subTracker2){
+        # to the primary/general section
+        if(grepl("Primary", tableLinks[primaryI[z]])){next}
+        if(race == "County elections"|race =="City and township elections"){
+          raceTracker1 <- which(subTitleIndex == (primaryI[(z)]+1))
+          raceTracker2 <- which(subTitleIndex == (primaryI[z+1]+1))-1
+          # raceTracker2 <- ifelse(t==tracker, length(subTitleIndex)-1,
+          #                       which(subTitleIndex == (primaryI[t+1]+1))-1)
+          for(k in raceTracker1:raceTracker2){
+            rows <- ifelse(k == raceTracker2,
+                           subTitleIndex[k+1] - subTitleIndex[k]-1,
+                           subTitleIndex[k+1] - subTitleIndex[k])
+            # if(rows < 2){next}
+            race <- html_text(tableLinks[subTitleIndex[k]]) %>% 
+              str_extract("((Count)|(City)|(May)|(Sta)).+((ly)|(ills)|(cil)|(ney)|(dge)|(ors)|(erk)|(iff)|(tive)|(ion)|(er)|(or))")
+            area <- if(grepl("At-large", tableLinks[subTitleIndex[k]])){"At-large"
+            }else if (grepl("Ward", tableLinks[subTitleIndex[k]])){
+              html_text(tableLinks[subTitleIndex[k]]) %>% str_extract("Ward.[:digit:]")
+            }else if (grepl("Areawide", tableLinks[subTitleIndex[k]])){"Areawide"
+            }else if (grepl("District", tableLinks[subTitleIndex[k]])){
+              html_text(tableLinks[subTitleIndex[k]]) %>% str_extract("District.[:digit:]")
+            }else{NA}
+            namesLinks <- tableLinks[(subTitleIndex[k]+1):(subTitleIndex[k]+rows-1)]
+            # namesLinks <- namesLinks[!grepl("mw-headline", namesLinks)]
+            # if(length(namesLinks) == 0){next}
+            link <- as.character(namesLinks) %>% 
+              str_extract("(?<=(href=\")).+?(?=(\" title))")
+            link <- paste("https://ballotpedia.org", link, sep = "")
+            names <- data.frame(Names = html_text(namesLinks)) %>% 
+              mutate(Names = ifelse(Names=="NA", NA, Names %>% str_trim()),
+                     County = CountyNames[j],
+                     State = LStateList[i],
+                     CandPage = if(length(namesLinks) == 0){NA}else{link},
+                     Race = race,
+                     Area = area)
+            pageNames <- rbind.fill(pageNames, names)}
+        }else{
+          rows <- primaryI[z+1] - primaryI[z]
+          # if(rows < 2){next}
+          # area <- if(grepl("District", tableLinks[subTitleIndex[j]])){
+          #   html_text(tableLinks[subTitleIndex[j]]) %>% str_extract("District.[:digit:]")
+          # }else if ( grepl("Ward", tableLinks[subTitleIndex[j]])){
+          #   html_text(tableLinks[subTitleIndex[j]]) %>% str_extract("Ward.[:digit:]")
+          # }else if (grepl("Areawide", tableLinks[subTitleIndex[j]])){"Areawide"
+          # }else if (grepl("At-large", tableLinks[subTitleIndex[j]])){"At-large"}else{NA}
+          namesLinks <- tableLinks[(primaryI[z]+1):(primaryI[z]+rows-1)]
+          # namesLinks <- namesLinks[!grepl("mw-headline", namesLinks)]
+          # if(length(namesLinks) == 0){next}
+          link <- as.character(namesLinks) %>% 
+            str_extract("(?<=(href=\")).+?(?=(\" title))")
+          link <- paste("https://ballotpedia.org", link, sep = "")
+          names <- data.frame(Names = html_text(namesLinks)) %>% 
+            mutate(Names = ifelse(Names=="NA", NA, Names %>% str_trim()),
+                   County = CountyNames[j],
+                   State = LStateList[i],
+                   CandPage = if(length(namesLinks) == 0){NA}else{link},
+                   Race = race)
+                   # ,Area = area)
+          names <- names[!grepl("https://ballotpedia.orgNA", names$CandPage),]
+          pageNames <- rbind.fill(pageNames, names)
+        }
+      }
+    }
+    countyNames <- rbind.fill(countyNames, pageNames)
+  }
+}
