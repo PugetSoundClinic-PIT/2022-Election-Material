@@ -442,6 +442,7 @@ MuNamesFin <- MuNamesFin %>% mutate(Party = Party %>% str_remove(" (page does no
 LRaceLinks <- Total[["Local"]][["Links"]]
 LStateList <- Total[["Local"]][["Locations"]]
 
+LNamesFin <- data.frame()
 for(i in 1:length(LRaceLinks)){
   # to each local election pages
   url <- LRaceLinks[i]
@@ -449,7 +450,7 @@ for(i in 1:length(LRaceLinks)){
   TCountyLinks <- webpage %>%
     html_nodes("#mw-content-text>div>p>a")
   TCountyLinks <- TCountyLinks[2:length(TCountyLinks)]
-  TCountyLinks <- TCountyLinks[!grepl("City", TCountyLinks)]
+  TCountyLinks <- TCountyLinks[!grepl("City|mw-redirect", TCountyLinks)]
   CountyNames <- html_text(TCountyLinks)
   CountyLinks <- as.character(TCountyLinks) %>% 
     str_extract("(?<=(href=\")).+?(?=(\" title))")
@@ -469,38 +470,65 @@ for(i in 1:length(LRaceLinks)){
     endI <- max(grep("#Voting_information", tableLinks))
     tableLinks <- tableLinks[startI:endI]
     titleIndex <- grep("mw-headline", tableLinks)
-    primaryI <- grep("General|Primary", tableLinks)
+    primaryI <- grep("\\(General\\)|\\(Primary\\)", tableLinks)
     subTitleIndex <- grep("<b>", tableLinks)
     titleIndex <- append(titleIndex,length(tableLinks))
     primaryI <- append(primaryI,length(tableLinks))
-    subTitleIndex <- append(subTitleIndex,titleIndex[2])
+    if(length(subTitleIndex)>0){
+    lastD <- min(which(titleIndex>=subTitleIndex[length(subTitleIndex)]))
+    subTitleIndex <- append(subTitleIndex,titleIndex[lastD])
+    }
     if(length(titleIndex)<2){next}
     tracker <- ifelse((titleIndex[length(titleIndex)]-titleIndex[length(titleIndex)-1])==1,
                       length(titleIndex)-2, length(titleIndex)-1)
     pageNames <- data.frame()
     for(t in 1:tracker){
-      # to each title section 
+      # to each title section
       race <- html_text(tableLinks[titleIndex[t]]) %>% str_extract(".*elections")
-      # if(TRUE %notin% (primaryI == (titleIndex[(t)]+1))){next}
-      subTracker1 <- which(primaryI == (titleIndex[(t)]+1)) #2,29
+      subTracker1 <- which(primaryI == (titleIndex[(t)]+1)) 
       subTracker2 <- ifelse(t==tracker, length(primaryI)-1,
-                            which(primaryI == (titleIndex[t+1]+1))-1) #29 63
+                            which(primaryI == (titleIndex[t+1]+1))-1) 
       for(z in subTracker1:subTracker2){
         # to the primary/general section
         if(grepl("Primary", tableLinks[primaryI[z]])){next}
-        if(race == "County elections"|race =="City and township elections"){
+        if((primaryI[(z)]+1)%in%subTitleIndex){
           raceTracker1 <- which(subTitleIndex == (primaryI[(z)]+1))
-          raceTracker2 <- which(subTitleIndex == (primaryI[z+1]+1))-1
-          # raceTracker2 <- ifelse(t==tracker, length(subTitleIndex)-1,
-          #                       which(subTitleIndex == (primaryI[t+1]+1))-1)
+          raceTracker2 <- ifelse((primaryI[z+1]+1)%notin%subTitleIndex,
+                                 length(subTitleIndex)-1,
+                                which(subTitleIndex == (primaryI[z+1]+1))-1)
           for(k in raceTracker1:raceTracker2){
-            rows <- ifelse(k == raceTracker2,
-                           subTitleIndex[k+1] - subTitleIndex[k]-1,
-                           subTitleIndex[k+1] - subTitleIndex[k])
-            # if(rows < 2){next}
-            race <- html_text(tableLinks[subTitleIndex[k]]) %>% 
-              str_extract("((Count)|(City)|(May)|(Sta)).+((ly)|(ills)|(cil)|(ney)|(dge)|(ors)|(erk)|(iff)|(tive)|(ion)|(er)|(or))")
+            rows <- if(k == raceTracker2){
+                      if(primaryI[z+1]<titleIndex[t+1]){
+                        primaryI[z+1] - subTitleIndex[k]
+                      }else{titleIndex[t+1] - subTitleIndex[k]}
+                    }else{
+                      subTitleIndex[k+1] - subTitleIndex[k]
+                    }
+            race <- html_text(tableLinks[subTitleIndex[k]])
+            race <- if(grepl("of", race)&grepl("Mayor", race)){race %>% str_extract(".*of") %>% str_sub(1,-4)
+              }else if(grepl("of", race)&grepl("Prosecuting Attorney", race)){race %>% str_extract(".*of") %>% str_sub(1,-4)
+                }else if(grepl("of", race)&grepl("Judge", race)){race %>% str_extract(".*of") %>% str_sub(1,-4)
+                  }else if(grepl(",", race)){race %>% str_extract(".*,") %>% str_sub(1,-2)
+                    }else if(grepl("At-large", race)){race %>% str_extract(".*At-") %>% str_sub(1,-5)
+                      }else if(grepl("At-Large", race)){race %>% str_extract(".*At-") %>% str_sub(1,-5)
+                        }else if(grepl("At Large", race)){race %>% str_extract(".*At ") %>% str_sub(1,-5)
+                          }else if(grepl("Ward", race)){race %>% str_extract(".*Ward") %>% str_sub(1,-6)
+                            }else if(grepl("Areawide", race)){race %>% str_extract(".*Areaw") %>% str_sub(1,-7)
+                              }else if(grepl("District", race)){race %>% str_extract(".*Dist") %>% str_sub(1,-6)
+                                }else{race}
+            if(grepl("County -", race)){
+              race <- race %>% str_extract("Coun.*") %>% str_sub(10,-1)}
+            shortRace <- race %>% str_extract("((Coun)|(City)|(Mayo)|(Stat)|(Scho)|(Pros)|(Comm)|(Judg)|(Soil)|(Conse)|(Boar)|(Hospi)|(Cler)|(Fir)|(Budg)|(Sanit)|(Trea)|(Supe)|(Trus)).*")
+            race <- ifelse(is.na(shortRace),race,
+                           ifelse(grepl("County -", shortRace),
+                                  shortRace %>% str_sub(10,-1),
+                                  shortRace))
+            if(race == "City City Council"){
+              race <- "City Council"
+            }
             area <- if(grepl("At-large", tableLinks[subTitleIndex[k]])){"At-large"
+            }else if(grepl("At-Large", tableLinks[subTitleIndex[k]])){"At-Large"
+            }else if(grepl("At Large", tableLinks[subTitleIndex[k]])){"At Large"
             }else if (grepl("Ward", tableLinks[subTitleIndex[k]])){
               html_text(tableLinks[subTitleIndex[k]]) %>% str_extract("Ward.[:digit:]")
             }else if (grepl("Areawide", tableLinks[subTitleIndex[k]])){"Areawide"
@@ -508,8 +536,6 @@ for(i in 1:length(LRaceLinks)){
               html_text(tableLinks[subTitleIndex[k]]) %>% str_extract("District.[:digit:]")
             }else{NA}
             namesLinks <- tableLinks[(subTitleIndex[k]+1):(subTitleIndex[k]+rows-1)]
-            # namesLinks <- namesLinks[!grepl("mw-headline", namesLinks)]
-            # if(length(namesLinks) == 0){next}
             link <- as.character(namesLinks) %>% 
               str_extract("(?<=(href=\")).+?(?=(\" title))")
             link <- paste("https://ballotpedia.org", link, sep = "")
@@ -523,16 +549,7 @@ for(i in 1:length(LRaceLinks)){
             pageNames <- rbind.fill(pageNames, names)}
         }else{
           rows <- primaryI[z+1] - primaryI[z]
-          # if(rows < 2){next}
-          # area <- if(grepl("District", tableLinks[subTitleIndex[j]])){
-          #   html_text(tableLinks[subTitleIndex[j]]) %>% str_extract("District.[:digit:]")
-          # }else if ( grepl("Ward", tableLinks[subTitleIndex[j]])){
-          #   html_text(tableLinks[subTitleIndex[j]]) %>% str_extract("Ward.[:digit:]")
-          # }else if (grepl("Areawide", tableLinks[subTitleIndex[j]])){"Areawide"
-          # }else if (grepl("At-large", tableLinks[subTitleIndex[j]])){"At-large"}else{NA}
           namesLinks <- tableLinks[(primaryI[z]+1):(primaryI[z]+rows-1)]
-          # namesLinks <- namesLinks[!grepl("mw-headline", namesLinks)]
-          # if(length(namesLinks) == 0){next}
           link <- as.character(namesLinks) %>% 
             str_extract("(?<=(href=\")).+?(?=(\" title))")
           link <- paste("https://ballotpedia.org", link, sep = "")
@@ -542,12 +559,62 @@ for(i in 1:length(LRaceLinks)){
                    State = LStateList[i],
                    CandPage = if(length(namesLinks) == 0){NA}else{link},
                    Race = race)
-                   # ,Area = area)
-          names <- names[!grepl("https://ballotpedia.orgNA", names$CandPage),]
           pageNames <- rbind.fill(pageNames, names)
         }
       }
     }
-    countyNames <- rbind.fill(countyNames, pageNames)
+    if(length(pageNames)>0){countyNames <- rbind.fill(countyNames, pageNames)}
   }
+  LNamesFin <- rbind.fill(LNamesFin, countyNames)
 }
+LNamesFin <- LNamesFin %>% distinct() # remove duplicates
+LNamesFin <- LNamesFin[!grepl("https://ballotpedia.orgNA", LNamesFin$CandPage),]
+
+#Get more information from the candidate's website
+Handles <- data.frame()
+for(i in 1:nrow(LNamesFin)){
+  #Goes to candidate links (if working)
+  if(is.na(LNamesFin[i,1])==FALSE & url.exists(LNamesFin[i, 4])==TRUE){
+    InfoPage <- read_html(LNamesFin[i, 4])
+    links <- InfoPage %>% html_nodes("a") %$% data.frame(hrefs=as(., "character")) #Reads webpage
+    
+    #Identifies Campaign Website
+    CampWeb <- links[grep("Campaign website|Official website|Personal website", links$hrefs), 1] %>% str_extract("http.+?(?=(\" t))")
+    CampWeb <- ifelse(is_empty(CampWeb)==TRUE, NA, CampWeb)
+    
+    #Identifies Campaign Twitter Handle
+    CampHand <- links[grep("www.twitter.*Camp", links$hrefs), 1] %>% str_remove(".*com\\/") %>% str_remove("(\").*")
+    CampHand <- ifelse(is_empty(CampHand)==TRUE, NA, CampHand)
+    
+    #Identifies Official Twitter Handle
+    OffHand <- links[grep("www.twitter.*Off", links$hrefs), 1] %>% str_remove(".*com\\/") %>% str_remove("(\").*")
+    OffHand <- ifelse(is_empty(OffHand)==TRUE, NA, OffHand)
+    
+    #Identifies Personal Twitter Handle
+    PerHand <- links[grep("www.twitter.*Pers", links$hrefs), 1] %>% str_remove(".*com\\/") %>% str_remove("(\").*")
+    PerHand <- ifelse(is_empty(PerHand)==TRUE, NA, PerHand)
+    
+    #Identifies Party
+    partyLink <- InfoPage %>% html_nodes(".widget-row.value-only") %$% data.frame(hrefs=as(., "character"))
+    Party <- ifelse(length(partyLink$hrefs)<=1, 
+                    NA, 
+                    ifelse(is_empty(grep("black", partyLink$hrefs))==FALSE,
+                                                           partyLink[max(grep("black", partyLink$hrefs)),1] %>% str_sub(49,-15),
+                                                           ifelse(is_empty(grep("Party|Independent|Unaffiliated|Nonpartisan", partyLink$hrefs)),
+                                                                  links[max(grep("Category.*Party|Independent|Unaffiliated|Nonpartisan", links$hrefs)), 1] %>% str_remove(".*Category:") %>% str_remove("(\").*"),
+                                                                  partyLink[max(grep("Party|Independent|Unaffiliated|Nonpartisan", partyLink$hrefs)),1]%>% 
+                                                                    str_extract("only.*(\")") %>% str_sub(6,-2))))
+    Party <- ifelse(is_empty(Party)==TRUE, NA, Party)
+    
+    #Creates the data frame
+    df <- data.frame(Names=LNamesFin[i,1], CampWeb, CampHand, OffHand, PerHand, Party)
+  }else {df <- data.frame(Names= LNamesFin[i,1], CampWeb = NA, CampHand = NA, OffHand = NA, PerHand = NA, Party=NA)} #Accounts for non-working links
+  Handles <- rbind(Handles, df)
+}
+
+LNamesFin <- cbind(LNamesFin, Handles %>% select(-Names))
+
+rm(df, links, CampHand, CampWeb, i, OffHand, Party, PerHand)
+
+LNamesFin <- LNamesFin %>% mutate(Party = Party %>% str_remove(" (page does not exist)"))
+
